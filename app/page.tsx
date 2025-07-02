@@ -3,10 +3,12 @@
 import React, { useState, useEffect } from 'react';
 
 interface DeploymentInfo {
+  status: string;
   timestamp: string;
   environment: string;
   version: string;
   uptime: number;
+  service: string;
 }
 
 export default function Home() {
