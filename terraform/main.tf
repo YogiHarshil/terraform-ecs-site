@@ -6,6 +6,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+  
+  # Note: Configure your backend before running terraform init
+  # Uncomment and configure the following for remote state storage:
+  # backend "s3" {
+  #   bucket = "your-terraform-state-bucket"
+  #   key    = "nextjs-ecs/terraform.tfstate"
+  #   region = "us-east-1"
+  # }
 }
 
 provider "aws" {

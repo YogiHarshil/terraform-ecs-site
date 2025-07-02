@@ -1,9 +1,7 @@
-name: Deploy to ECS
+name: Deploy to AWS ECS
 
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
 
 env:
@@ -17,21 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
-      
-      - run: npm install
-      - run: npm run lint
+          cache: 'npm'
+      - run: npm ci
       - run: npm run build
 
-  terraform-check:
+  deploy:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    defaults:
-      run:
-        working-directory: ./terraform
+    needs: test
     steps:
       - uses: actions/checkout@v4
       
@@ -39,54 +32,35 @@ jobs:
         with:
           terraform_version: 1.6.0
       
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - run: terraform init
-      - run: terraform validate
-      - run: terraform plan
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
       
       - name: Deploy Infrastructure
         working-directory: ./terraform
         run: |
           terraform init
-          terraform apply -auto-approve
+          terraform plan -out=tfplan
+          terraform apply tfplan
       
-      - name: Login to ECR
+      - uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
       
-      - name: Build and push image
+      - name: Build and Deploy
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          # Build and tag the image with both commit SHA and latest
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          # Push both tags
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-      
-      - name: Update ECS service
-        run: |
-          aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
-            --force-new-deployment 
+          
+          # Force new deployment
+          aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment 

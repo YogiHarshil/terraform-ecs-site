@@ -1,12 +1,23 @@
-FROM node:18-alpine
+# Build stage
+FROM node:18-alpine AS builder
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+COPY package*.json ./
+RUN npm ci
 COPY . .
-ENV NODE_ENV production
 RUN npm run build
-COPY .next/standalone .
-COPY .next/static ./.next/static
-COPY public ./public
+
+# Production stage  
+FROM node:18-alpine AS runner
+WORKDIR /app
+
+# Copy package files and install only production dependencies
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Copy built application from builder stage
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+
 EXPOSE 3000
 CMD ["node", "server.js"] 
