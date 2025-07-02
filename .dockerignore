@@ -1,0 +1,11 @@
+Dockerfile
+.dockerignore
+node_modules
+.next
+.git
+*.md
+.env*
+terraform/
+.github/
+coverage
+.nyc_output 

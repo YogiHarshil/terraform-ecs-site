@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Next.js
+/.next/
+/out/
+
+# Environment
+.env*
+
+# Terraform
+terraform/*.tfstate*
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfvars
+
+# IDE
+.vscode/
+.DS_Store 
