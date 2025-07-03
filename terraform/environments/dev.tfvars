@@ -44,5 +44,5 @@ max_capacity = 2
 cpu_target_value = 70
 
 # GitHub OIDC (⚠️  UPDATE THIS TO YOUR REPOSITORY ⚠️ )
-github_repository = "YogiHarshil/terraform-ecs-site"  # UPDATE TO YOUR ACTUAL REPO
+github_repository = "YogiHarshil/terraform-ecs-site"  # Your repository
 github_branch = "main" 
