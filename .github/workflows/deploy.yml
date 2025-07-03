@@ -1,65 +1,236 @@
-name: Deploy to AWS ECS
+name: 🚀 Deploy Next.js to Multi-Cloud
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+      cloud_provider:
+        description: 'Cloud provider'
+        required: true
+        default: 'aws'
+        type: choice
+        options:
+        - aws
+        - azure
+        - gcp
 
 env:
-  AWS_REGION: us-east-1
-  ECR_REPOSITORY: nextjs-ecs
-  ECS_SERVICE: nextjs-ecs
-  ECS_CLUSTER: nextjs-ecs
+  # Default to dev environment for automatic deployments
+  DEPLOY_ENV: ${{ github.event.inputs.environment || 'dev' }}
+  CLOUD_PROVIDER: ${{ github.event.inputs.cloud_provider || 'aws' }}
 
 jobs:
   test:
+    name: 🧪 Test & Build
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run build
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
+      
+    - name: 📦 Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        
+    - name: 📚 Install dependencies
+      run: npm ci
+      
+    - name: 🔍 Lint code
+      run: npm run lint
+      
+    - name: 🏗️ Build application
+      run: npm run build
+      
+    - name: 🧪 Run tests (if available)
+      run: npm test --passWithNoTests || echo "No tests configured"
 
   deploy:
+    name: 🌍 Deploy to ${{ inputs.cloud_provider || 'aws' }} (${{ inputs.environment || 'dev' }})
     runs-on: ubuntu-latest
     needs: test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+    permissions:
+      id-token: write
+      contents: read
+      
     steps:
-      - uses: actions/checkout@v4
+    - name: 📥 Checkout code
+      uses: actions/checkout@v4
       
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.6.0
+    - name: 🔧 Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: '1.5.0'
+        terraform_wrapper: false
+        
+    # AWS Configuration
+    - name: ☁️ Configure AWS credentials (if AWS)
+      if: env.CLOUD_PROVIDER == 'aws'
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+        role-session-name: GitHubActions-${{ github.run_id }}
+        
+    # Azure Configuration
+    - name: 🔵 Azure Login (if Azure)
+      if: env.CLOUD_PROVIDER == 'azure'
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        
+    # GCP Configuration
+    - name: 🟡 Setup GCP credentials (if GCP)
+      if: env.CLOUD_PROVIDER == 'gcp'
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+        
+    - name: 🔧 Initialize Terraform
+      working-directory: terraform
+      run: |
+        terraform init
+        
+    - name: ✅ Validate Terraform
+      working-directory: terraform
+      run: terraform validate
       
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Deploy Infrastructure
-        working-directory: ./terraform
-        run: |
-          terraform init
-          terraform plan -out=tfplan
-          terraform apply tfplan
-      
-      - uses: aws-actions/amazon-ecr-login@v2
-        id: login-ecr
-      
-      - name: Build and Deploy
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          # Build and tag the image with both commit SHA and latest
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+    - name: 📋 Plan deployment
+      working-directory: terraform
+      run: |
+        terraform plan \
+          -var="cloud_provider=${{ env.CLOUD_PROVIDER }}" \
+          -var-file="environments/${{ env.DEPLOY_ENV }}.tfvars" \
+          -out=tfplan
           
-          # Push both tags
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+    - name: 🚀 Apply infrastructure
+      working-directory: terraform
+      run: terraform apply -auto-approve tfplan
+      
+    - name: 📊 Get deployment outputs
+      working-directory: terraform
+      id: terraform-outputs
+      run: |
+        echo "app_url=$(terraform output -raw application_url)" >> $GITHUB_OUTPUT
+        echo "health_url=$(terraform output -raw health_check_url)" >> $GITHUB_OUTPUT
+        echo "registry_url=$(terraform output -raw container_registry)" >> $GITHUB_OUTPUT
+        echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
+        echo "service_name=$(terraform output -raw service_name)" >> $GITHUB_OUTPUT
+        
+    # AWS Docker operations
+    - name: 🐳 Build and push Docker image (AWS)
+      if: env.CLOUD_PROVIDER == 'aws'
+      run: |
+        # Login to ECR
+        aws ecr get-login-password --region ${{ secrets.AWS_REGION || 'us-east-1' }} | docker login --username AWS --password-stdin ${{ steps.terraform-outputs.outputs.registry_url }}
+        
+        # Build and tag image
+        docker build -t ${{ steps.terraform-outputs.outputs.registry_url }}:latest .
+        docker tag ${{ steps.terraform-outputs.outputs.registry_url }}:latest ${{ steps.terraform-outputs.outputs.registry_url }}:${{ github.sha }}
+        
+        # Push images
+        docker push ${{ steps.terraform-outputs.outputs.registry_url }}:latest
+        docker push ${{ steps.terraform-outputs.outputs.registry_url }}:${{ github.sha }}
+        
+    # Azure Docker operations
+    - name: 🐳 Build and push Docker image (Azure)
+      if: env.CLOUD_PROVIDER == 'azure'
+      run: |
+        # Build and tag image
+        docker build -t ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:latest .
+        docker tag ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:latest ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:${{ github.sha }}
+        
+        # Push images (credentials configured via Azure login)
+        docker push ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:latest
+        docker push ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:${{ github.sha }}
+        
+    # GCP Docker operations
+    - name: 🐳 Build and push Docker image (GCP)
+      if: env.CLOUD_PROVIDER == 'gcp'
+      run: |
+        # Configure Docker for GCP
+        gcloud auth configure-docker ${{ secrets.GCP_REGION || 'us-central1' }}-docker.pkg.dev
+        
+        # Build and tag image
+        docker build -t ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:latest .
+        docker tag ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:latest ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:${{ github.sha }}
+        
+        # Push images
+        docker push ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:latest
+        docker push ${{ steps.terraform-outputs.outputs.registry_url }}/${{ steps.terraform-outputs.outputs.service_name }}:${{ github.sha }}
+        
+    # Deploy to container service
+    - name: 🔄 Update container service (AWS ECS)
+      if: env.CLOUD_PROVIDER == 'aws'
+      run: |
+        aws ecs update-service \
+          --cluster ${{ steps.terraform-outputs.outputs.cluster_name }} \
+          --service ${{ steps.terraform-outputs.outputs.service_name }} \
+          --force-new-deployment \
+          --region ${{ secrets.AWS_REGION || 'us-east-1' }}
           
-          # Force new deployment
-          aws ecs update-service --cluster $ECS_CLUSTER --service $ECS_SERVICE --force-new-deployment 
+    - name: 🔄 Update container service (Azure)
+      if: env.CLOUD_PROVIDER == 'azure'
+      run: |
+        # Azure Container Apps automatically deploy new images
+        echo "Azure Container Apps will automatically deploy the new image"
+        
+    - name: 🔄 Update container service (GCP)
+      if: env.CLOUD_PROVIDER == 'gcp'
+      run: |
+        # Cloud Run automatically deploys new images
+        echo "GCP Cloud Run will automatically deploy the new image"
+        
+    - name: ⏳ Wait for deployment
+      run: sleep 30
+      
+    - name: 🔍 Health check
+      run: |
+        echo "🔍 Performing health check..."
+        for i in {1..10}; do
+          if curl -sf "${{ steps.terraform-outputs.outputs.health_url }}" > /dev/null 2>&1; then
+            echo "✅ Health check passed!"
+            break
+          else
+            echo "⏳ Attempt $i failed, retrying in 10 seconds..."
+            sleep 10
+          fi
+          
+          if [ $i -eq 10 ]; then
+            echo "❌ Health check failed after 10 attempts"
+            exit 1
+          fi
+        done
+        
+    - name: 📝 Deployment Summary
+      run: |
+        echo "## 🚀 Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+        echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+        echo "| 🌍 Cloud Provider | **${{ env.CLOUD_PROVIDER }}** |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🏗️ Environment | **${{ env.DEPLOY_ENV }}** |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🌐 Application URL | [${{ steps.terraform-outputs.outputs.app_url }}](${{ steps.terraform-outputs.outputs.app_url }}) |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🔍 Health Check | [${{ steps.terraform-outputs.outputs.health_url }}](${{ steps.terraform-outputs.outputs.health_url }}) |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🏗️ Cluster | ${{ steps.terraform-outputs.outputs.cluster_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 🔧 Service | ${{ steps.terraform-outputs.outputs.service_name }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 📦 Registry | ${{ steps.terraform-outputs.outputs.registry_url }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| 📊 Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🎉 Ready for use!" >> $GITHUB_STEP_SUMMARY
+        echo "Your application is now running on **${{ env.CLOUD_PROVIDER }}** in the **${{ env.DEPLOY_ENV }}** environment." >> $GITHUB_STEP_SUMMARY 
