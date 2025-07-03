@@ -7,14 +7,14 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 3.0"
-    }
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
+    # azurerm = {
+    #   source  = "hashicorp/azurerm"
+    #   version = "~> 3.0"
+    # }
+    # google = {
+    #   source  = "hashicorp/google"
+    #   version = "~> 5.0"
+    # }
     random = {
       source  = "hashicorp/random"
       version = "~> 3.1"
@@ -50,30 +50,30 @@ provider "aws" {
   }
 }
 
-# Azure Provider Configuration
-provider "azurerm" {
-  features {
-    resource_group {
-      prevent_deletion_if_contains_resources = false
-    }
-    key_vault {
-      purge_soft_delete_on_destroy    = true
-      recover_soft_deleted_key_vaults = true
-    }
-  }
-  
-  # Skip provider registration if not using Azure
-  skip_provider_registration = var.cloud_provider != "azure"
-}
+# Azure Provider Configuration (commented out for AWS-only deployment)
+# provider "azurerm" {
+#   features {
+#     resource_group {
+#       prevent_deletion_if_contains_resources = false
+#     }
+#     key_vault {
+#       purge_soft_delete_on_destroy    = true
+#       recover_soft_deleted_key_vaults = true
+#     }
+#   }
+#   
+#   # Skip provider registration if not using Azure
+#   skip_provider_registration = var.cloud_provider != "azure"
+# }
 
-# Google Cloud Provider Configuration
-provider "google" {
-  project = var.cloud_provider == "gcp" ? var.gcp_project : null
-  region  = var.gcp_region
-  
-  # Only configure if using GCP
-  user_project_override = var.cloud_provider == "gcp"
-}
+# Google Cloud Provider Configuration (commented out for AWS-only deployment)
+# provider "google" {
+#   project = var.cloud_provider == "gcp" ? var.gcp_project : null
+#   region  = var.gcp_region
+#   
+#   # Only configure if using GCP
+#   user_project_override = var.cloud_provider == "gcp"
+# }
 
 # Random provider for generating unique names
 provider "random" {}
@@ -162,10 +162,10 @@ data "aws_availability_zones" "available" {
   }
 }
 
-data "azurerm_client_config" "current" {
-  count = var.cloud_provider == "azure" ? 1 : 0
-}
+# data "azurerm_client_config" "current" {
+#   count = var.cloud_provider == "azure" ? 1 : 0
+# }
 
-data "google_client_config" "current" {
-  count = var.cloud_provider == "gcp" ? 1 : 0
-} 
+# data "google_client_config" "current" {
+#   count = var.cloud_provider == "gcp" ? 1 : 0
+# } 
